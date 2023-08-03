@@ -181,7 +181,7 @@ bool BranchElimination::TryEliminateBranchWithPhiCondition(Node* branch,
   Node* predecessor0 = merge_inputs[0];
   Node* predecessor1 = merge_inputs[1];
   DCHECK_EQ(branch->op()->ControlOutputCount(), 2);
-  Node** projections = zone()->NewArray<Node*>(2);
+  Node** projections = zone()->AllocateArray<Node*>(2);
   NodeProperties::CollectControlProjections(branch, projections, 2);
   Node* branch_true = projections[0];
   Node* branch_false = projections[1];
@@ -279,8 +279,7 @@ Reduction BranchElimination::ReduceTrapConditional(Node* node) {
       // graph()->end().
       ReplaceWithValue(node, dead(), dead(), dead());
       Node* control = graph()->NewNode(common()->Throw(), node, node);
-      NodeProperties::MergeControlToEnd(graph(), common(), control);
-      Revisit(graph()->end());
+      MergeControlToEnd(graph(), common(), control);
       return Changed(node);
     } else {
       // This will not trap, remove it by relaxing effect/control.
@@ -322,9 +321,7 @@ Reduction BranchElimination::ReduceDeoptimizeConditional(Node* node) {
     } else {
       control = graph()->NewNode(common()->Deoptimize(p.reason(), p.feedback()),
                                  frame_state, effect, control);
-      // TODO(bmeurer): This should be on the AdvancedReducer somehow.
-      NodeProperties::MergeControlToEnd(graph(), common(), control);
-      Revisit(graph()->end());
+      MergeControlToEnd(graph(), common(), control);
     }
     return Replace(dead());
   }

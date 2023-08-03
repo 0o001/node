@@ -18,7 +18,7 @@
 #include "src/heap/gc-tracer.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/heap.h"
-#include "src/heap/local-heap.h"
+#include "src/heap/local-heap-inl.h"
 #include "src/heap/parked-scope.h"
 #include "src/logging/counters-scopes.h"
 #include "src/objects/objects.h"
@@ -113,9 +113,8 @@ void IsolateSafepoint::InitiateGlobalSafepointScopeRaw(
   if (isolate() != initiator) {
     // An isolate might be waiting in the event loop. Post a task in order to
     // wake it up.
-    V8::GetCurrentPlatform()
-        ->GetForegroundTaskRunner(reinterpret_cast<v8::Isolate*>(isolate()))
-        ->PostTask(std::make_unique<GlobalSafepointInterruptTask>(heap_));
+    isolate()->heap()->GetForegroundTaskRunner()->PostTask(
+        std::make_unique<GlobalSafepointInterruptTask>(heap_));
 
     // Request an interrupt in case of long-running code.
     isolate()->stack_guard()->RequestGlobalSafepoint();
@@ -156,8 +155,7 @@ size_t IsolateSafepoint::SetSafepointRequestedFlags(
 
 void IsolateSafepoint::LockMutex(LocalHeap* local_heap) {
   if (!local_heaps_mutex_.TryLock()) {
-    ParkedScope parked_scope(local_heap);
-    local_heaps_mutex_.Lock();
+    local_heap->BlockWhileParked([this]() { local_heaps_mutex_.Lock(); });
   }
 }
 
@@ -344,8 +342,8 @@ void GlobalSafepoint::EnterGlobalSafepointScope(Isolate* initiator) {
 
   if (!clients_mutex_.TryLock()) {
     IgnoreLocalGCRequests ignore_gc_requests(initiator->heap());
-    ParkedScope parked_scope(initiator->main_thread_local_heap());
-    clients_mutex_.Lock();
+    initiator->main_thread_local_heap()->BlockWhileParked(
+        [this]() { clients_mutex_.Lock(); });
   }
 
   if (++active_safepoint_scopes_ > 1) return;

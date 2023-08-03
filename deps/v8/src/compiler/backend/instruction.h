@@ -31,6 +31,10 @@ namespace compiler {
 class Schedule;
 class SourcePositionTable;
 
+namespace turboshaft {
+class Graph;
+}
+
 #if defined(V8_CC_MSVC) && defined(V8_TARGET_ARCH_IA32)
 // MSVC on x86 has issues with ALIGNAS(8) on InstructionOperand, but does
 // align the object to 8 bytes anyway (covered by a static assert below).
@@ -574,6 +578,7 @@ class LocationOperand : public InstructionOperand {
       case MachineRepresentation::kNone:
         return false;
       case MachineRepresentation::kMapWord:
+      case MachineRepresentation::kIndirectPointer:
         break;
     }
     UNREACHABLE();
@@ -1254,6 +1259,8 @@ enum class StateValueKind : uint8_t {
   kDuplicate
 };
 
+std::ostream& operator<<(std::ostream& os, StateValueKind kind);
+
 class StateValueDescriptor {
  public:
   StateValueDescriptor()
@@ -1309,6 +1316,8 @@ class StateValueDescriptor {
     DCHECK(kind_ == StateValueKind::kArgumentsElements);
     return args_type_;
   }
+
+  void Print(std::ostream& os) const;
 
  private:
   StateValueDescriptor(StateValueKind kind, MachineType type)
@@ -1449,13 +1458,20 @@ class FrameStateDescriptor : public ZoneObject {
   size_t stack_count() const { return stack_count_; }
   MaybeHandle<SharedFunctionInfo> shared_info() const { return shared_info_; }
   FrameStateDescriptor* outer_state() const { return outer_state_; }
+  bool HasClosure() const {
+    return type_ != FrameStateType::kConstructInvokeStub;
+  }
   bool HasContext() const {
     return FrameStateFunctionInfo::IsJSFunctionType(type_) ||
            type_ == FrameStateType::kBuiltinContinuation ||
 #if V8_ENABLE_WEBASSEMBLY
            type_ == FrameStateType::kJSToWasmBuiltinContinuation ||
+           // TODO(mliedtke): Should we skip the context for the FrameState of
+           // inlined wasm functions?
+           type_ == FrameStateType::kWasmInlinedIntoJS ||
 #endif  // V8_ENABLE_WEBASSEMBLY
-           type_ == FrameStateType::kConstructStub;
+           type_ == FrameStateType::kConstructCreateStub ||
+           type_ == FrameStateType::kConstructInvokeStub;
   }
 
   // The frame height on the stack, in number of slots, as serialized into a
@@ -1621,6 +1637,8 @@ class V8_EXPORT_PRIVATE InstructionBlock final
   inline bool IsLoopHeaderInAssemblyOrder() const {
     return loop_header_alignment_;
   }
+  bool omitted_by_jump_threading() const { return omitted_by_jump_threading_; }
+  void set_omitted_by_jump_threading() { omitted_by_jump_threading_ = true; }
 
   using Predecessors = ZoneVector<RpoNumber>;
   Predecessors& predecessors() { return predecessors_; }
@@ -1667,10 +1685,10 @@ class V8_EXPORT_PRIVATE InstructionBlock final
   const RpoNumber loop_header_;
   const RpoNumber loop_end_;
   RpoNumber dominator_;
-  int32_t code_start_;   // start index of arch-specific code.
-  int32_t code_end_ = -1;     // end index of arch-specific code.
-  const bool deferred_ : 1;   // Block contains deferred code.
-  bool handler_ : 1;          // Block is a handler entry point.
+  int32_t code_start_;       // start index of arch-specific code.
+  int32_t code_end_ = -1;    // end index of arch-specific code.
+  const bool deferred_ : 1;  // Block contains deferred code.
+  bool handler_ : 1;         // Block is a handler entry point.
   bool switch_target_ : 1;
   bool code_target_alignment_ : 1;  // insert code target alignment before this
                                     // block
@@ -1679,6 +1697,7 @@ class V8_EXPORT_PRIVATE InstructionBlock final
   bool needs_frame_ : 1;
   bool must_construct_frame_ : 1;
   bool must_deconstruct_frame_ : 1;
+  bool omitted_by_jump_threading_ : 1;  // Just for cleaner code comments.
 };
 
 class InstructionSequence;
@@ -1705,6 +1724,8 @@ class V8_EXPORT_PRIVATE InstructionSequence final
  public:
   static InstructionBlocks* InstructionBlocksFor(Zone* zone,
                                                  const Schedule* schedule);
+  static InstructionBlocks* InstructionBlocksFor(
+      Zone* zone, const turboshaft::Graph& graph);
   InstructionSequence(Isolate* isolate, Zone* zone,
                       InstructionBlocks* instruction_blocks);
   InstructionSequence(const InstructionSequence&) = delete;

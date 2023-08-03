@@ -6,7 +6,7 @@
 #define V8_OBJECTS_SMI_H_
 
 #include "src/common/globals.h"
-#include "src/objects/heap-object.h"
+#include "src/objects/objects.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -25,20 +25,22 @@ class Smi : public Object {
   // This replaces the OBJECT_CONSTRUCTORS macro, because Smis are special
   // in that we want them to be constexprs.
   constexpr Smi() : Object() {}
+  explicit constexpr Smi(Address ptr, SkipTypeCheckTag)
+      : Object(ptr, SkipTypeCheckTag()) {}
   explicit constexpr Smi(Address ptr) : Object(ptr) {
     DCHECK(HAS_SMI_TAG(ptr));
   }
 
   // Returns the integer value.
-  inline int value() const { return Internals::SmiValue(ptr()); }
-  inline Smi ToUint32Smi() {
+  inline constexpr int value() const { return Internals::SmiValue(ptr()); }
+  inline constexpr Smi ToUint32Smi() {
     if (value() <= 0) return Smi::FromInt(0);
     return Smi::FromInt(static_cast<uint32_t>(value()));
   }
 
   // Convert a Smi object to an int.
-  static inline int ToInt(const Object object) {
-    return Smi::cast(object).value();
+  static inline constexpr int ToInt(const Object object) {
+    return Smi(object.ptr()).value();
   }
 
   // Convert a value to a Smi object.
@@ -47,7 +49,7 @@ class Smi : public Object {
     return Smi(Internals::IntToSmi(value));
   }
 
-  static inline Smi FromIntptr(intptr_t value) {
+  static inline constexpr Smi FromIntptr(intptr_t value) {
     DCHECK(Smi::IsValid(value));
     int smi_shift_bits = kSmiTagSize + kSmiShiftSize;
     return Smi((static_cast<Address>(value) << smi_shift_bits) | kSmiTag);
@@ -55,14 +57,14 @@ class Smi : public Object {
 
   // Given {value} in [0, 2^31-1], force it into Smi range by changing at most
   // the MSB (leaving the lower 31 bit unchanged).
-  static inline Smi From31BitPattern(int value) {
+  static inline constexpr Smi From31BitPattern(int value) {
     return Smi::FromInt((value << (32 - kSmiValueSize)) >>
                         (32 - kSmiValueSize));
   }
 
   template <typename E,
             typename = typename std::enable_if<std::is_enum<E>::value>::type>
-  static inline Smi FromEnum(E value) {
+  static inline constexpr Smi FromEnum(E value) {
     static_assert(sizeof(E) <= sizeof(int));
     return FromInt(static_cast<int>(value));
   }
@@ -88,7 +90,7 @@ class Smi : public Object {
 
   // Dispatched behavior.
   V8_EXPORT_PRIVATE void SmiPrint(std::ostream& os) const;
-  DECL_VERIFIER(Smi)
+  DECL_STATIC_VERIFIER(Smi)
 
   // Since this is a constexpr, "calling" it is just as efficient
   // as reading a constant.
